@@ -291,6 +291,7 @@ class ImportPreviewRow(BaseModel):
 
 class ImportResult(BaseModel):
     format: str
+    headers: list[str]
     total_rows: int
     imported: int
     skipped_duplicates: int

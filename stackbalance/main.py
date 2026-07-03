@@ -3,6 +3,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .api import backup, budget, core, importer, recurring, reports, sinking, transactions
@@ -34,8 +35,10 @@ def create_app() -> FastAPI:
         return {"status": "ok", "version": __version__}
 
     @app.get("/", include_in_schema=False)
-    def dashboard():
+    def spa():
         return FileResponse(STATIC_DIR / "index.html")
+
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     return app
 
