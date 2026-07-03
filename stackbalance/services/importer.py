@@ -289,6 +289,7 @@ def import_rows(
 
     return schemas.ImportResult(
         format=fmt,
+        headers=headers,
         total_rows=len(rows),
         imported=imported,
         skipped_duplicates=skipped,
