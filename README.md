@@ -1,8 +1,10 @@
 # Stack Balance
 
 Self-hosted, **local-first** zero-based budgeting. One Python process, one
-SQLite file, no cloud, no accounts, no telemetry. A REST API drives everything;
-a built-in dashboard (zero external assets — works fully offline) visualizes it.
+SQLite file, no cloud, no accounts, no telemetry. A REST API drives everything,
+and a built-in web GUI (framework-free, no build step, zero external assets —
+works fully offline) covers daily use: Dashboard, Budget, Transactions, Import,
+and Settings.
 
 ## Features
 
@@ -40,10 +42,23 @@ pip install -r requirements.txt
 python run.py                 # serves http://127.0.0.1:8321
 ```
 
-Open <http://127.0.0.1:8321> for the dashboard, <http://127.0.0.1:8321/docs>
+Open <http://127.0.0.1:8321> for the app, <http://127.0.0.1:8321/docs>
 for the API.
 
-### First-run setup (via the API)
+### The GUI
+
+| Page | What you can do |
+|---|---|
+| **Dashboard** | To-Be-Budgeted / balance / burn / runway tiles, 12-month cash-flow chart, spending by category, sinking-fund progress, quick actions |
+| **Budget** | Navigate months, edit assignments inline, copy last month's assignments, see overspent envelopes |
+| **Transactions** | Filter/search, add/edit with a split-category editor, toggle cleared, select many and bulk recategorize/move/clear/delete |
+| **Import** | Drag-and-drop a CSV/JSON export, review the dry-run preview, correct the auto-detected column mapping, commit |
+| **Settings** | Manage accounts, category groups/categories, recurring rules, sinking funds, and backups (create/download/restore) |
+
+First-run setup happens entirely in the GUI: create an account and your
+category groups under **Settings**, then import or add transactions.
+
+### First-run setup (via the API, optional)
 
 ```bash
 BASE=http://127.0.0.1:8321/api
