@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..services import credit as credit_service
+from ..services import reconciliation as reconciliation_service
 from .deps import get_session
 
 router = APIRouter()
@@ -85,6 +86,17 @@ def delete_account(account_id: int, session: Session = Depends(get_session)):
         )
     session.delete(account)
     session.commit()
+
+
+@router.post("/accounts/{account_id}/reconcile", response_model=schemas.ReconcileResult)
+def reconcile_account(account_id: int, data: schemas.ReconcileIn,
+                      session: Session = Depends(get_session)):
+    """Finish a reconciliation: lock all cleared transactions and, if the
+    cleared balance differs from the statement, book an adjustment."""
+    account = session.get(models.Account, account_id)
+    if account is None:
+        raise HTTPException(status_code=404, detail="account not found")
+    return reconciliation_service.reconcile(session, account, data)
 
 
 @router.get("/category-groups", response_model=list[schemas.CategoryGroupOut])

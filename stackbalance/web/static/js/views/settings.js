@@ -86,6 +86,8 @@ function accountsCard(refresh) {
       el("td", { class: "num", text: fmt(account.balance_cents) }),
       el("td", { class: "num", text: fmt(account.cleared_balance_cents) }),
       el("td", { text: account.on_budget ? "✓" : "" }),
+      el("td", { class: "muted", text: account.last_reconciled_at
+        ? account.last_reconciled_at.slice(0, 10) : "never" }),
       el("td", { text: account.is_active ? "" : "inactive" }),
       el("td", { class: "right" }, editButton, " ", deleteButton));
   });
@@ -97,7 +99,8 @@ function accountsCard(refresh) {
           el("thead", {}, el("tr", {},
             el("th", { text: "Name" }), el("th", { text: "Type" }),
             el("th", { class: "num", text: "Balance" }), el("th", { class: "num", text: "Cleared" }),
-            el("th", { text: "On budget" }), el("th"), el("th"))),
+            el("th", { text: "On budget" }), el("th", { text: "Last reconciled" }),
+            el("th"), el("th"))),
           el("tbody", {}, ...rows)))
       : el("div", { class: "empty", text: "No accounts yet." }),
     el("div", { class: "inline-form" }, addButton));

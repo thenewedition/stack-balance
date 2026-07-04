@@ -47,6 +47,12 @@ _MIGRATIONS: list[tuple[str, str, str]] = [
      "ALTER TABLE accounts ADD COLUMN payment_category_id INTEGER REFERENCES categories(id)"),
     ("transactions", "transfer_peer_id",
      "ALTER TABLE transactions ADD COLUMN transfer_peer_id INTEGER REFERENCES transactions(id)"),
+    ("transactions", "reconciled",
+     "ALTER TABLE transactions ADD COLUMN reconciled BOOLEAN NOT NULL DEFAULT 0"),
+    ("accounts", "last_reconciled_at",
+     "ALTER TABLE accounts ADD COLUMN last_reconciled_at DATETIME"),
+    ("accounts", "last_reconciled_balance_cents",
+     "ALTER TABLE accounts ADD COLUMN last_reconciled_balance_cents INTEGER"),
 ]
 
 

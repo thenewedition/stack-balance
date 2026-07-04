@@ -64,6 +64,16 @@ async function draw(host) {
   const addButton = el("button", { class: "primary", text: "Add transaction" });
   addButton.addEventListener("click", () => editorModal(null, () => draw(host)));
 
+  const reconcileButton = el("button", { text: "Reconcile" });
+  if (state.filters.account_id) {
+    reconcileButton.title = "Check the register against a statement";
+    reconcileButton.addEventListener("click", () =>
+      reconcileModal(Number(state.filters.account_id), () => draw(host)));
+  } else {
+    reconcileButton.disabled = true;
+    reconcileButton.title = "Filter to a single account first";
+  }
+
   const filters = el("div", { class: "filters" },
     el("label", {}, "Account", accountFilter),
     el("label", {}, "Category", categoryFilter),
@@ -72,6 +82,7 @@ async function draw(host) {
     el("label", {}, "Payee", payeeInput),
     el("label", {}, "Status", clearedFilter),
     el("span", { class: "spacer", style: "flex:1" }),
+    reconcileButton,
     addButton);
 
   /* ----- table ----- */
@@ -113,9 +124,14 @@ async function draw(host) {
       categoryCell.textContent = refdata.categoryName(txn.splits[0]?.category_id);
     }
 
-    const clearedCell = el("td", { class: "clickable", title: "Click to toggle cleared",
-      text: txn.cleared ? "✓" : "○" });
+    const clearedCell = el("td", { class: "clickable",
+      title: txn.reconciled ? "Reconciled (locked) — edit to unlock" : "Click to toggle cleared",
+      text: txn.reconciled ? "🔒" : txn.cleared ? "✓" : "○" });
     clearedCell.addEventListener("click", async () => {
+      if (txn.reconciled) {
+        toast("Reconciled — open Edit and untick “Keep reconciled” to unlock");
+        return;
+      }
       try {
         await api.patch(`/transactions/${txn.id}`, { cleared: !txn.cleared });
         txn.cleared = !txn.cleared;
@@ -206,6 +222,50 @@ async function draw(host) {
     bulkbar));
 }
 
+/* ---------- reconcile modal ---------- */
+
+async function reconcileModal(accountId, onDone) {
+  const account = await api.get(`/accounts/${accountId}`);
+  const statementInput = el("input", { class: "num", type: "text", inputmode: "decimal",
+    value: centsToInput(account.cleared_balance_cents), placeholder: "0.00" });
+  const differenceLine = el("p", { style: "font-weight:600" });
+
+  const updateDifference = () => {
+    const statement = parseDollars(statementInput.value);
+    if (Number.isNaN(statement)) { differenceLine.textContent = "Enter the statement balance"; return; }
+    const difference = statement - account.cleared_balance_cents;
+    differenceLine.textContent = difference === 0
+      ? "Difference: $0.00 — ready to finish ✓"
+      : `Difference: ${fmt(difference)} — finishing will add a balance adjustment`;
+    differenceLine.style.color = difference === 0 ? "var(--good-text)" : "var(--expense)";
+  };
+  statementInput.addEventListener("input", updateDifference);
+  updateDifference();
+
+  openModal(`Reconcile — ${account.name}`, el("div", {},
+    el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+      "Tick off transactions as cleared (✓ column) until the cleared balance matches your statement, then finish. Finishing locks all cleared transactions."),
+    el("p", {}, "Cleared balance: ", el("b", { text: fmt(account.cleared_balance_cents) }),
+      account.last_reconciled_at
+        ? el("span", { class: "muted", text: ` · last reconciled ${account.last_reconciled_at.slice(0, 10)}` })
+        : null),
+    field("Statement balance ($)", statementInput),
+    differenceLine), {
+    submitLabel: "Finish reconciliation",
+    onSubmit: async () => {
+      const statement = parseDollars(statementInput.value);
+      if (Number.isNaN(statement)) { toast("Enter the statement balance"); return false; }
+      const result = await api.post(`/accounts/${accountId}/reconcile`, {
+        statement_balance_cents: statement,
+      });
+      toast(result.adjustment_cents === 0
+        ? `Reconciled — locked ${result.reconciled_count} transaction(s)`
+        : `Reconciled ${result.reconciled_count} transaction(s) with a ${fmt(result.adjustment_cents)} adjustment`);
+      onDone();
+    },
+  });
+}
+
 /* ---------- add/edit modal with split editor ---------- */
 
 function editorModal(txn, onDone) {
@@ -248,6 +308,16 @@ function editorModal(txn, onDone) {
   const amountInput = el("input", { class: "num", type: "text", inputmode: "decimal",
     value: txn ? centsToInput(Math.abs(txn.amount_cents)) : "", placeholder: "0.00" });
   const cleared = checkbox("Cleared", txn?.cleared ?? false);
+
+  /* reconciled lock: amount/date/account frozen until unlocked */
+  const isReconciled = isEdit && txn.reconciled;
+  const keepReconciled = checkbox("Keep reconciled (locks amount, date, account)", true);
+  const syncLock = () => {
+    const locked = isReconciled && keepReconciled.input.checked;
+    for (const control of [amountInput, dateInput, accountSelect]) control.disabled = locked;
+    if (isTransfer) accountSelect.disabled = true;
+  };
+  keepReconciled.input.addEventListener("change", syncLock);
 
   const categoryOptions = [
     { value: "", label: "— Uncategorized —" },
@@ -326,14 +396,18 @@ function editorModal(txn, onDone) {
   const body = el("div", {},
     isTransfer ? el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
       `Linked transfer with “${refdata.accountName(txn.transfer_account_id)}” — date and amount stay in sync on both sides.`) : null,
+    isReconciled ? el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+      "This transaction was reconciled against a statement. Changing its amount, date, or account will make the account disagree with that statement.") : null,
     el("div", { class: "form-grid" },
       field("Account", accountSelect), field("Date", dateInput),
       el("div", { class: "wide" }, field("Payee", payeeInput)),
       field("Direction", direction), field("Amount", amountInput),
       el("div", { class: "wide" }, field("Memo", memoInput))),
     el("div", { class: "wide" }, transferSection),
-    cleared.node, splitToggle.node, singleSection, splitSection);
+    cleared.node, isReconciled ? keepReconciled.node : null,
+    splitToggle.node, singleSection, splitSection);
   syncSplitVisibility();
+  syncLock();
 
   openModal(isEdit ? "Edit transaction" : "Add transaction", body, {
     submitLabel: isEdit ? "Save changes" : "Add",
@@ -357,13 +431,18 @@ function editorModal(txn, onDone) {
       }
 
       if (isTransfer) {
-        await api.patch(`/transactions/${txn.id}`, {
-          date: dateInput.value,
+        const locked = isReconciled && keepReconciled.input.checked;
+        const patch = {
           payee: payeeInput.value.trim(),
           memo: memoInput.value.trim(),
-          amount_cents: Number(direction.value) * absCents,
           cleared: cleared.input.checked,
-        });
+        };
+        if (!locked) {
+          patch.date = dateInput.value;
+          patch.amount_cents = Number(direction.value) * absCents;
+          if (isReconciled) patch.reconciled = false;
+        }
+        await api.patch(`/transactions/${txn.id}`, patch);
         toast("Transfer updated (both sides)");
         onDone();
         return;
@@ -399,6 +478,17 @@ function editorModal(txn, onDone) {
           amount_cents: amountCents,
           memo: "",
         }];
+      }
+
+      if (isReconciled) {
+        if (keepReconciled.input.checked) {
+          // Locked fields are disabled in the form; don't send them.
+          delete payload.amount_cents;
+          delete payload.date;
+          delete payload.account_id;
+        } else {
+          payload.reconciled = false;
+        }
       }
 
       if (isEdit) await api.patch(`/transactions/${txn.id}`, payload);

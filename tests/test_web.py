@@ -9,7 +9,7 @@ def test_static_assets_served(client):
     for path in ("/static/css/app.css", "/static/js/app.js", "/static/js/api.js",
                  "/static/js/views/dashboard.js", "/static/js/views/budget.js",
                  "/static/js/views/transactions.js", "/static/js/views/import.js",
-                 "/static/js/views/settings.js"):
+                 "/static/js/views/reports.js", "/static/js/views/settings.js"):
         assert client.get(path).status_code == 200, path
 
 

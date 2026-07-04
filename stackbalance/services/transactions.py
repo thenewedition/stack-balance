@@ -72,10 +72,31 @@ def update_transaction(session: Session, txn_id: int,
             raise HTTPException(status_code=422,
                                 detail="cannot move a transfer to another account; delete and recreate it")
 
+    # Reconciled transactions are locked against edits that would change the
+    # reconciled balance (amount/date/account); recategorizing stays allowed.
+    # Un-reconciling in the same request lifts the lock.
+    unlocking = data.reconciled is False
+    if txn.reconciled and not unlocking:
+        locked_edit = (
+            data.amount_cents is not None or data.date is not None
+            or (data.account_id is not None and data.account_id != txn.account_id)
+        )
+        if locked_edit:
+            raise HTTPException(
+                status_code=422,
+                detail="transaction is reconciled — set reconciled=false to edit it",
+            )
+
     for field in ("account_id", "date", "payee", "memo", "cleared"):
         value = getattr(data, field)
         if value is not None:
             setattr(txn, field, value)
+    if data.reconciled is not None:
+        txn.reconciled = data.reconciled
+    if data.cleared is False:
+        txn.reconciled = False  # un-clearing always un-reconciles
+    if txn.reconciled and not txn.cleared:
+        txn.cleared = True  # reconciled implies cleared
 
     if data.amount_cents is not None:
         txn.amount_cents = data.amount_cents
@@ -113,15 +134,19 @@ def bulk_edit(session: Session, edit: schemas.BulkEdit) -> schemas.BulkEditResul
     if edit.delete:
         from . import transfers
         deleted_ids: set[int] = set()
+        deleted = 0
         for txn in txns:
             if txn.id in deleted_ids:
                 continue
+            if txn.reconciled:
+                continue  # reconciled rows survive bulk deletes
             if txn.transfer_peer_id is not None:
                 deleted_ids.add(txn.transfer_peer_id)
             transfers.delete_with_peer(session, txn)
             deleted_ids.add(txn.id)
+            deleted += 1
         session.commit()
-        return schemas.BulkEditResult(matched=matched, updated=0, deleted=matched)
+        return schemas.BulkEditResult(matched=matched, updated=0, deleted=deleted)
 
     if edit.set_account_id is not None and session.get(models.Account, edit.set_account_id) is None:
         raise HTTPException(status_code=404, detail="account not found")
@@ -138,8 +163,11 @@ def bulk_edit(session: Session, edit: schemas.BulkEdit) -> schemas.BulkEditResul
             txn.memo, changed = edit.set_memo, True
         if edit.set_cleared is not None:
             txn.cleared, changed = edit.set_cleared, True
-        # Transfers keep their account pairing and stay uncategorized.
-        if edit.set_account_id is not None and not is_transfer:
+            if edit.set_cleared is False:
+                txn.reconciled = False
+        # Transfers keep their account pairing and stay uncategorized;
+        # reconciled rows keep the account that fixes their reconciled balance.
+        if edit.set_account_id is not None and not is_transfer and not txn.reconciled:
             txn.account_id, changed = edit.set_account_id, True
         if edit.set_category_id is not None and not is_transfer:
             txn.splits = [

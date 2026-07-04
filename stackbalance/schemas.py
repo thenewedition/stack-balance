@@ -42,6 +42,8 @@ class AccountOut(ORMModel):
     on_budget: bool
     is_active: bool
     payment_category_id: int | None = None
+    last_reconciled_at: dt.datetime | None = None
+    last_reconciled_balance_cents: int | None = None
     balance_cents: int = 0
     cleared_balance_cents: int = 0
 
@@ -117,6 +119,7 @@ class TransactionUpdate(BaseModel):
     memo: str | None = None
     amount_cents: int | None = None
     cleared: bool | None = None
+    reconciled: bool | None = None
     category_id: int | None = None
     splits: list[SplitIn] | None = None
 
@@ -129,6 +132,7 @@ class TransactionOut(ORMModel):
     memo: str
     amount_cents: int
     cleared: bool
+    reconciled: bool = False
     import_hash: str | None
     recurring_rule_id: int | None
     transfer_peer_id: int | None = None
@@ -150,6 +154,21 @@ class TransferIn(BaseModel):
 class TransferOut(BaseModel):
     from_transaction: TransactionOut
     to_transaction: TransactionOut
+
+
+# ---------- Reconciliation ----------
+
+class ReconcileIn(BaseModel):
+    statement_balance_cents: int
+    # Where a balance-correction lands; defaults to the first income category
+    # so To Be Budgeted absorbs the difference.
+    adjustment_category_id: int | None = None
+
+
+class ReconcileResult(BaseModel):
+    reconciled_count: int
+    adjustment_cents: int
+    adjustment_transaction: TransactionOut | None = None
 
 
 class BulkEdit(BaseModel):
@@ -360,3 +379,32 @@ class SpendingByCategory(BaseModel):
     category_id: int | None
     name: str
     spent_cents: int
+
+
+class NetWorthMonth(BaseModel):
+    month: str
+    assets_cents: int
+    debts_cents: int
+    net_cents: int
+
+
+class NetWorthOut(BaseModel):
+    months: list[NetWorthMonth]
+
+
+class CategoryTrendMonth(BaseModel):
+    month: str
+    spent_cents: int
+
+
+class CategoryTrendOut(BaseModel):
+    category_id: int
+    name: str
+    months: list[CategoryTrendMonth]
+    average_cents: int
+
+
+class PayeeReportRow(BaseModel):
+    payee: str
+    count: int
+    total_cents: int
