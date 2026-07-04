@@ -28,9 +28,14 @@ class Account(Base):
     opening_balance_cents: Mapped[int] = mapped_column(Integer, default=0)
     on_budget: Mapped[bool] = mapped_column(Boolean, default=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Credit accounts: the envelope that holds money earmarked to pay this card.
+    payment_category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("categories.id", ondelete="SET NULL"), default=None
+    )
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
 
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="account")
+    payment_category: Mapped["Category | None"] = relationship(foreign_keys=[payment_category_id])
 
 
 class CategoryGroup(Base):
@@ -74,12 +79,25 @@ class Transaction(Base):
     recurring_rule_id: Mapped[int | None] = mapped_column(
         ForeignKey("recurring_rules.id", ondelete="SET NULL"), default=None
     )
+    # Transfers between own accounts are a linked pair; neither side is
+    # income or spending, so reports and envelopes ignore them (except the
+    # credit-card payment envelope, which they pay down).
+    transfer_peer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("transactions.id", ondelete="SET NULL"), default=None
+    )
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
 
     account: Mapped[Account] = relationship(back_populates="transactions")
     splits: Mapped[list["Split"]] = relationship(
         back_populates="transaction", cascade="all, delete-orphan"
     )
+    transfer_peer: Mapped["Transaction | None"] = relationship(
+        remote_side="Transaction.id", foreign_keys=[transfer_peer_id], viewonly=True
+    )
+
+    @property
+    def transfer_account_id(self) -> int | None:
+        return self.transfer_peer.account_id if self.transfer_peer is not None else None
 
 
 class Split(Base):

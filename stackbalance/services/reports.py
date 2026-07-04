@@ -28,6 +28,7 @@ def cash_flow(session: Session, months: int = 12,
         )
         .join(models.Account)
         .where(models.Account.on_budget.is_(True))
+        .where(models.Transaction.transfer_peer_id.is_(None))  # own-account moves aren't cash flow
         .where(month_expr >= start_month)
         .where(month_expr <= as_of.strftime("%Y-%m"))
         .group_by("month")
@@ -63,6 +64,7 @@ def burn_rate(session: Session, window_days: int = 30,
         )
         .join(models.Account)
         .where(models.Account.on_budget.is_(True))
+        .where(models.Transaction.transfer_peer_id.is_(None))  # transfers aren't burn
         .where(models.Transaction.date >= start)
         .where(models.Transaction.date <= as_of)
     ).one()

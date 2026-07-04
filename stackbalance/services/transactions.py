@@ -64,6 +64,14 @@ def update_transaction(session: Session, txn_id: int,
     if txn is None:
         raise HTTPException(status_code=404, detail="transaction not found")
 
+    if txn.transfer_peer_id is not None:
+        if data.category_id is not None or data.splits is not None:
+            raise HTTPException(status_code=422,
+                                detail="transfers cannot be categorized — both sides stay uncategorized")
+        if data.account_id is not None and data.account_id != txn.account_id:
+            raise HTTPException(status_code=422,
+                                detail="cannot move a transfer to another account; delete and recreate it")
+
     for field in ("account_id", "date", "payee", "memo", "cleared"):
         value = getattr(data, field)
         if value is not None:
@@ -82,6 +90,10 @@ def update_transaction(session: Session, txn_id: int,
             detail="changing the amount of a split transaction requires new splits",
         )
 
+    if txn.transfer_peer_id is not None and (data.date is not None or data.amount_cents is not None):
+        from . import transfers
+        transfers.sync_peer(session, txn)
+
     session.commit()
     return txn
 
@@ -99,8 +111,15 @@ def bulk_edit(session: Session, edit: schemas.BulkEdit) -> schemas.BulkEditResul
     matched = len(txns)
 
     if edit.delete:
+        from . import transfers
+        deleted_ids: set[int] = set()
         for txn in txns:
-            session.delete(txn)
+            if txn.id in deleted_ids:
+                continue
+            if txn.transfer_peer_id is not None:
+                deleted_ids.add(txn.transfer_peer_id)
+            transfers.delete_with_peer(session, txn)
+            deleted_ids.add(txn.id)
         session.commit()
         return schemas.BulkEditResult(matched=matched, updated=0, deleted=matched)
 
@@ -112,15 +131,17 @@ def bulk_edit(session: Session, edit: schemas.BulkEdit) -> schemas.BulkEditResul
     updated = 0
     for txn in txns:
         changed = False
+        is_transfer = txn.transfer_peer_id is not None
         if edit.set_payee is not None:
             txn.payee, changed = edit.set_payee, True
         if edit.set_memo is not None:
             txn.memo, changed = edit.set_memo, True
         if edit.set_cleared is not None:
             txn.cleared, changed = edit.set_cleared, True
-        if edit.set_account_id is not None:
+        # Transfers keep their account pairing and stay uncategorized.
+        if edit.set_account_id is not None and not is_transfer:
             txn.account_id, changed = edit.set_account_id, True
-        if edit.set_category_id is not None:
+        if edit.set_category_id is not None and not is_transfer:
             txn.splits = [
                 models.Split(category_id=edit.set_category_id, amount_cents=txn.amount_cents)
             ]

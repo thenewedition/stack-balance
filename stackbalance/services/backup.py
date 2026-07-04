@@ -20,11 +20,12 @@ from sqlalchemy.orm import Session
 
 from .. import config, models
 
-# Restore order respects foreign keys.
+# Restore order respects foreign keys (accounts reference categories via
+# payment_category_id, so categories come first).
 _TABLES: list[tuple[str, type]] = [
-    ("accounts", models.Account),
     ("category_groups", models.CategoryGroup),
     ("categories", models.Category),
+    ("accounts", models.Account),
     ("recurring_rules", models.RecurringRule),
     ("transactions", models.Transaction),
     ("splits", models.Split),
@@ -128,11 +129,22 @@ def restore_backup(session: Session, content: bytes) -> dict[str, int]:
     for _name, model in reversed(_TABLES):
         session.execute(delete(model))
     counts: dict[str, int] = {}
+    transfer_links: list[tuple[int, int]] = []
     for name, model in _TABLES:
         rows = data.get(name, [])
         for row in rows:
-            session.add(model(**_coerce(model, row)))
+            coerced = _coerce(model, row)
+            # Transfer pairs reference each other; insert with the link
+            # stripped, then restore it in a second pass so the FK holds.
+            if name == "transactions" and coerced.get("transfer_peer_id") is not None:
+                transfer_links.append((coerced["id"], coerced.pop("transfer_peer_id")))
+            session.add(model(**coerced))
         counts[name] = len(rows)
+    session.flush()
+    for txn_id, peer_id in transfer_links:
+        txn = session.get(models.Transaction, txn_id)
+        if txn is not None:
+            txn.transfer_peer_id = peer_id
     session.commit()
     # SQLite integer PKs are rowids: next id is max(id)+1, so restoring with
     # explicit ids needs no sequence fixup.

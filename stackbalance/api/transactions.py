@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .. import models, schemas
 from ..services import transactions as txn_service
+from ..services import transfers as transfer_service
 from .deps import get_session
 
 router = APIRouter()
@@ -27,7 +28,8 @@ def list_transactions(
 ):
     q = (
         select(models.Transaction)
-        .options(selectinload(models.Transaction.splits))
+        .options(selectinload(models.Transaction.splits),
+                 selectinload(models.Transaction.transfer_peer))
         .order_by(models.Transaction.date.desc(), models.Transaction.id.desc())
         .limit(limit)
         .offset(offset)
@@ -73,13 +75,26 @@ def update_transaction(txn_id: int, data: schemas.TransactionUpdate,
 
 @router.delete("/transactions/{txn_id}", status_code=204)
 def delete_transaction(txn_id: int, session: Session = Depends(get_session)):
+    """Deleting one side of a transfer removes both sides."""
     txn = session.get(models.Transaction, txn_id)
     if txn is None:
         raise HTTPException(status_code=404, detail="transaction not found")
-    session.delete(txn)
+    transfer_service.delete_with_peer(session, txn)
     session.commit()
 
 
 @router.post("/transactions/bulk", response_model=schemas.BulkEditResult)
 def bulk_edit(edit: schemas.BulkEdit, session: Session = Depends(get_session)):
     return txn_service.bulk_edit(session, edit)
+
+
+@router.post("/transfers", response_model=schemas.TransferOut, status_code=201)
+def create_transfer(data: schemas.TransferIn, session: Session = Depends(get_session)):
+    """Move money between your own accounts. Not income, not spending —
+    reports ignore transfers, and a transfer into a credit account pays
+    down that card's payment envelope."""
+    out_txn, in_txn = transfer_service.create_transfer(session, data)
+    return schemas.TransferOut(
+        from_transaction=schemas.TransactionOut.model_validate(out_txn),
+        to_transaction=schemas.TransactionOut.model_validate(in_txn),
+    )

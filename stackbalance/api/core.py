@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
+from ..services import credit as credit_service
 from .deps import get_session
 
 router = APIRouter()
@@ -42,6 +43,8 @@ def create_account(data: schemas.AccountIn, session: Session = Depends(get_sessi
         raise HTTPException(status_code=409, detail="account name already exists")
     account = models.Account(**data.model_dump())
     session.add(account)
+    session.flush()
+    credit_service.ensure_payment_category(session, account)
     session.commit()
     return _account_out(session, account)
 
@@ -62,6 +65,7 @@ def update_account(account_id: int, data: schemas.AccountUpdate,
         raise HTTPException(status_code=404, detail="account not found")
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(account, field, value)
+    credit_service.ensure_payment_category(session, account)
     session.commit()
     return _account_out(session, account)
 
@@ -161,6 +165,14 @@ def delete_category(category_id: int, session: Session = Depends(get_session)):
     category = session.get(models.Category, category_id)
     if category is None:
         raise HTTPException(status_code=404, detail="category not found")
+    linked_account = session.execute(
+        select(models.Account).where(models.Account.payment_category_id == category_id)
+    ).scalar_one_or_none()
+    if linked_account:
+        raise HTTPException(
+            status_code=409,
+            detail=f"this is the payment envelope for credit account “{linked_account.name}”",
+        )
     in_use = session.execute(
         select(models.Split.id).where(models.Split.category_id == category_id).limit(1)
     ).first()

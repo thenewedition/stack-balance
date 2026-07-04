@@ -101,7 +101,11 @@ async function draw(host) {
     rowChecks.push(check);
 
     const categoryCell = el("td");
-    if (txn.splits.length > 1) {
+    if (txn.transfer_peer_id !== null) {
+      categoryCell.append(el("span", { class: "split-badge", text: "⇄ transfer" }),
+        document.createTextNode(
+          (txn.amount_cents < 0 ? "to " : "from ") + refdata.accountName(txn.transfer_account_id)));
+    } else if (txn.splits.length > 1) {
       categoryCell.append(el("span", { class: "split-badge", text: "split" }),
         document.createTextNode(txn.splits.map(s =>
           `${refdata.categoryName(s.category_id)} ${fmt(s.amount_cents)}`).join(" · ")));
@@ -206,6 +210,7 @@ async function draw(host) {
 
 function editorModal(txn, onDone) {
   const isEdit = txn !== null;
+  const isTransfer = isEdit && txn.transfer_peer_id !== null;
   const accountSelect = select(
     refdata.activeAccounts().map(a => ({ value: a.id, label: a.name })),
     txn?.account_id ?? refdata.activeAccounts()[0]?.id);
@@ -213,12 +218,33 @@ function editorModal(txn, onDone) {
     toast("Create an account under Settings first");
     return;
   }
+  if (isTransfer) accountSelect.disabled = true;
   const dateInput = el("input", { type: "date", value: txn?.date ?? today() });
   const payeeInput = el("input", { type: "text", value: txn?.payee ?? "", placeholder: "Payee" });
   const memoInput = el("input", { type: "text", value: txn?.memo ?? "", placeholder: "Memo (optional)" });
-  const direction = select(
-    [{ value: "-1", label: "Outflow (spending)" }, { value: "1", label: "Inflow (income/refund)" }],
-    txn ? (txn.amount_cents < 0 ? "-1" : "1") : "-1");
+  const directionOptions = isTransfer
+    ? [{ value: String(Math.sign(txn.amount_cents)), label: "Transfer (linked pair)" }]
+    : [{ value: "-1", label: "Outflow (spending)" }, { value: "1", label: "Inflow (income/refund)" },
+       ...(isEdit ? [] : [{ value: "transfer", label: "Transfer to another account" }])];
+  const direction = select(directionOptions,
+    isTransfer ? String(Math.sign(txn.amount_cents))
+    : txn ? (txn.amount_cents < 0 ? "-1" : "1") : "-1");
+  if (isTransfer) direction.disabled = true;
+
+  /* transfer target (only for new transfers) */
+  const transferTarget = select(
+    refdata.activeAccounts().map(a => ({ value: a.id, label: a.name })));
+  const transferSection = field("To account", transferTarget);
+  const syncTransferTarget = () => {
+    // Target list excludes the source account.
+    const fromId = accountSelect.value;
+    transferTarget.replaceChildren(...refdata.activeAccounts()
+      .filter(a => String(a.id) !== fromId)
+      .map(a => el("option", { value: String(a.id), text: a.name })));
+  };
+  accountSelect.addEventListener("change", () => {
+    if (direction.value === "transfer") syncTransferTarget();
+  });
   const amountInput = el("input", { class: "num", type: "text", inputmode: "decimal",
     value: txn ? centsToInput(Math.abs(txn.amount_cents)) : "", placeholder: "0.00" });
   const cleared = checkbox("Cleared", txn?.cleared ?? false);
@@ -272,6 +298,16 @@ function editorModal(txn, onDone) {
   amountInput.addEventListener("input", () => { if (splitToggle.input.checked) updateSplitSum(); });
 
   const syncSplitVisibility = () => {
+    const transferMode = direction.value === "transfer" || isTransfer;
+    transferSection.style.display = direction.value === "transfer" ? "" : "none";
+    if (transferMode) {
+      splitSection.style.display = "none";
+      singleSection.style.display = "none";
+      splitToggle.node.style.display = "none";
+      if (direction.value === "transfer") syncTransferTarget();
+      return;
+    }
+    splitToggle.node.style.display = "";
     const on = splitToggle.input.checked;
     splitSection.style.display = on ? "" : "none";
     singleSection.style.display = on ? "none" : "";
@@ -285,22 +321,55 @@ function editorModal(txn, onDone) {
     }
   };
   splitToggle.input.addEventListener("change", syncSplitVisibility);
+  direction.addEventListener("change", syncSplitVisibility);
 
   const body = el("div", {},
+    isTransfer ? el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
+      `Linked transfer with “${refdata.accountName(txn.transfer_account_id)}” — date and amount stay in sync on both sides.`) : null,
     el("div", { class: "form-grid" },
       field("Account", accountSelect), field("Date", dateInput),
       el("div", { class: "wide" }, field("Payee", payeeInput)),
       field("Direction", direction), field("Amount", amountInput),
       el("div", { class: "wide" }, field("Memo", memoInput))),
+    el("div", { class: "wide" }, transferSection),
     cleared.node, splitToggle.node, singleSection, splitSection);
   syncSplitVisibility();
 
   openModal(isEdit ? "Edit transaction" : "Add transaction", body, {
     submitLabel: isEdit ? "Save changes" : "Add",
     onSubmit: async () => {
-      const sign = Number(direction.value);
       const absCents = Math.abs(parseDollars(amountInput.value));
       if (Number.isNaN(absCents) || absCents === 0) { toast("Enter an amount"); return false; }
+
+      if (direction.value === "transfer") {
+        if (!transferTarget.value) { toast("Pick a target account"); return false; }
+        await api.post("/transfers", {
+          from_account_id: Number(accountSelect.value),
+          to_account_id: Number(transferTarget.value),
+          date: dateInput.value,
+          amount_cents: absCents,
+          memo: memoInput.value.trim(),
+          cleared: cleared.input.checked,
+        });
+        toast("Transfer recorded");
+        onDone();
+        return;
+      }
+
+      if (isTransfer) {
+        await api.patch(`/transactions/${txn.id}`, {
+          date: dateInput.value,
+          payee: payeeInput.value.trim(),
+          memo: memoInput.value.trim(),
+          amount_cents: Number(direction.value) * absCents,
+          cleared: cleared.input.checked,
+        });
+        toast("Transfer updated (both sides)");
+        onDone();
+        return;
+      }
+
+      const sign = Number(direction.value);
       const amountCents = sign * absCents;
 
       const payload = {

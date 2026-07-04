@@ -40,10 +40,31 @@ def reset_engine():
     _SessionLocal = None
 
 
+# Columns added after the 0.1 schema; applied to existing databases on startup
+# (SQLite create_all never alters existing tables).
+_MIGRATIONS: list[tuple[str, str, str]] = [
+    ("accounts", "payment_category_id",
+     "ALTER TABLE accounts ADD COLUMN payment_category_id INTEGER REFERENCES categories(id)"),
+    ("transactions", "transfer_peer_id",
+     "ALTER TABLE transactions ADD COLUMN transfer_peer_id INTEGER REFERENCES transactions(id)"),
+]
+
+
+def _migrate(engine):
+    with engine.connect() as conn:
+        for table, column, ddl in _MIGRATIONS:
+            columns = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
+            if columns and column not in columns:
+                conn.exec_driver_sql(ddl)
+        conn.commit()
+
+
 def init_db():
     from . import models  # noqa: F401  (register tables)
 
-    Base.metadata.create_all(get_engine())
+    engine = get_engine()
+    Base.metadata.create_all(engine)
+    _migrate(engine)
 
 
 def get_session():
