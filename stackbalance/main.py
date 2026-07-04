@@ -6,7 +6,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .api import backup, budget, core, importer, recurring, reports, sinking, transactions
+from .api import (autocat, backup, budget, core, importer, recurring, reports,
+                  sinking, transactions)
 from .database import init_db
 
 STATIC_DIR = Path(__file__).parent / "web" / "static"
@@ -34,7 +35,8 @@ def create_app() -> FastAPI:
     )
 
     for router in (core.router, transactions.router, budget.router, recurring.router,
-                   sinking.router, importer.router, backup.router, reports.router):
+                   sinking.router, importer.router, backup.router, reports.router,
+                   autocat.router):
         app.include_router(router, prefix="/api")
 
     @app.get("/api/health")
@@ -44,6 +46,17 @@ def create_app() -> FastAPI:
     @app.get("/", include_in_schema=False)
     def spa():
         return FileResponse(STATIC_DIR / "index.html")
+
+    # PWA files must be served from the root so the service worker can claim
+    # scope "/" and the manifest resolves relative to it.
+    @app.get("/manifest.webmanifest", include_in_schema=False)
+    def manifest():
+        return FileResponse(STATIC_DIR / "manifest.webmanifest",
+                            media_type="application/manifest+json")
+
+    @app.get("/sw.js", include_in_schema=False)
+    def service_worker():
+        return FileResponse(STATIC_DIR / "sw.js", media_type="application/javascript")
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

@@ -38,3 +38,9 @@ async function render() {
 
 addEventListener("hashchange", render);
 render();
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {
+    /* offline support unavailable (e.g. non-secure context) — app still works */
+  });
+}
