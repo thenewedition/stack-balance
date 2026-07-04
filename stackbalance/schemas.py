@@ -41,6 +41,7 @@ class AccountOut(ORMModel):
     opening_balance_cents: int
     on_budget: bool
     is_active: bool
+    payment_category_id: int | None = None
     balance_cents: int = 0
     cleared_balance_cents: int = 0
 
@@ -130,8 +131,25 @@ class TransactionOut(ORMModel):
     cleared: bool
     import_hash: str | None
     recurring_rule_id: int | None
+    transfer_peer_id: int | None = None
+    # The other side's account, so clients can render "Transfer ⇄ Savings".
+    transfer_account_id: int | None = None
     created_at: dt.datetime
     splits: list[SplitOut]
+
+
+class TransferIn(BaseModel):
+    from_account_id: int
+    to_account_id: int
+    date: dt.date
+    amount_cents: int = Field(gt=0, description="always positive; direction comes from the accounts")
+    memo: str = ""
+    cleared: bool = False
+
+
+class TransferOut(BaseModel):
+    from_transaction: TransactionOut
+    to_transaction: TransactionOut
 
 
 class BulkEdit(BaseModel):

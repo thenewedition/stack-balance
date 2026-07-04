@@ -15,6 +15,13 @@ STATIC_DIR = Path(__file__).parent / "web" / "static"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    # Credit accounts created before payment envelopes existed get one now.
+    from .database import get_session
+    from .services import credit
+
+    session_gen = get_session()
+    credit.ensure_all_payment_categories(next(session_gen))
+    session_gen.close()
     yield
 
 

@@ -1,13 +1,50 @@
 "use strict";
 
 import { api } from "../api.js";
-import { el, toast } from "../dom.js";
-import { fmt, parseDollars, centsToInput, currentMonth, monthAdd, monthLabel } from "../format.js";
+import { el, toast, openModal, field, select } from "../dom.js";
+import { fmt, parseDollars, centsToInput, currentMonth, monthAdd, monthLabel, today } from "../format.js";
+import * as refdata from "../refdata.js";
 
 let month = currentMonth();
 
+function payCardModal(cardAccount, availableCents, onDone) {
+  const sources = refdata.activeAccounts().filter(a => a.type !== "credit");
+  if (!sources.length) { toast("No account to pay from"); return; }
+  const fromSelect = select(sources.map(a => ({ value: a.id, label: a.name })));
+  const dateInput = el("input", { type: "date", value: today() });
+  const amountInput = el("input", { class: "num", type: "text", inputmode: "decimal",
+    value: availableCents > 0 ? centsToInput(availableCents) : "", placeholder: "0.00" });
+
+  openModal(`Record payment — ${cardAccount.name}`, el("div", {},
+    el("p", { class: "muted", style: "font-size:12px;margin-top:0",
+      text: `Envelope available: ${fmt(availableCents)}. A payment is a transfer — it isn't counted as spending.` }),
+    field("Pay from", fromSelect),
+    field("Date", dateInput),
+    field("Amount ($)", amountInput)), {
+    submitLabel: "Record payment",
+    onSubmit: async () => {
+      const cents = parseDollars(amountInput.value);
+      if (Number.isNaN(cents) || cents <= 0) { toast("Enter a positive amount"); return false; }
+      await api.post("/transfers", {
+        from_account_id: Number(fromSelect.value),
+        to_account_id: cardAccount.id,
+        date: dateInput.value,
+        amount_cents: cents,
+        memo: "credit card payment",
+      });
+      toast(`Paid ${fmt(cents)} toward ${cardAccount.name}`);
+      onDone();
+    },
+  });
+}
+
 export async function render(host) {
+  await refdata.load(true);
   const budget = await api.get(`/budget/${month}`);
+  // payment envelope category id -> its credit account
+  const cardByCategory = new Map(refdata.data.accounts
+    .filter(a => a.payment_category_id !== null)
+    .map(a => [a.payment_category_id, a]));
   const spendRows = budget.categories.filter(c => !c.is_income);
   const incomeRows = budget.categories.filter(c => c.is_income);
 
@@ -87,8 +124,19 @@ export async function render(host) {
     } else {
       availableCell.textContent = fmt(row.available_cents);
     }
+
+    const nameCell = el("td", { text: row.name });
+    const card = cardByCategory.get(row.category_id);
+    if (card) {
+      const payButton = el("button", { class: "icon", style: "margin-left:8px",
+        title: `Record a payment toward ${card.name}`, text: "Record payment" });
+      payButton.addEventListener("click", () =>
+        payCardModal(card, row.available_cents, () => render(host)));
+      nameCell.append(payButton);
+    }
+
     body.append(el("tr", { class: "no-hover" },
-      el("td", { text: row.name }),
+      nameCell,
       el("td", { class: "num" }, input),
       el("td", { class: "num" + (row.activity_cents < 0 ? " neg" : ""), text: fmt(row.activity_cents) }),
       availableCell));

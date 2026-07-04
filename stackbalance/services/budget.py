@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
+from . import credit
 
 
 def month_of(d) -> str:
@@ -19,7 +20,8 @@ def month_of(d) -> str:
 
 def _split_activity_by_category(session: Session, up_to_month: str, income: bool):
     """Sum of split amounts per category for splits dated in months <= up_to_month,
-    restricted to income or non-income categories. On-budget accounts only."""
+    restricted to income or non-income categories. On-budget accounts only.
+    Raw split sums — credit-card earmark adjustments are applied by callers."""
     month_expr = func.strftime("%Y-%m", models.Transaction.date)
     q = (
         select(models.Split.category_id, func.coalesce(func.sum(models.Split.amount_cents), 0))
@@ -78,6 +80,19 @@ def month_summary(session: Session, month: str) -> schemas.MonthBudgetOut:
     month_spend = _activity_for_month(session, month, income=False)
     month_income = _activity_for_month(session, month, income=True)
 
+    # Credit-card payment envelopes: card spending earmarks money in, card
+    # payments (transfers) spend it down. Applied per-category only — the
+    # month totals below stay raw so "spending this month" reflects real
+    # spending, not internal envelope moves.
+    cum_adjust = credit.earmark_adjustments(session, up_to_month=month)
+    month_adjust = credit.earmark_adjustments(session, month=month)
+    display_cum_spend = dict(cum_spend)
+    display_month_spend = dict(month_spend)
+    for category_id, adjustment in cum_adjust.items():
+        display_cum_spend[category_id] = display_cum_spend.get(category_id, 0) + adjustment
+    for category_id, adjustment in month_adjust.items():
+        display_month_spend[category_id] = display_month_spend.get(category_id, 0) + adjustment
+
     month_alloc = dict(
         session.execute(
             select(
@@ -110,7 +125,7 @@ def month_summary(session: Session, month: str) -> schemas.MonthBudgetOut:
                 )
             )
             continue
-        available = cum_alloc.get(cat.id, 0) + cum_spend.get(cat.id, 0)
+        available = cum_alloc.get(cat.id, 0) + display_cum_spend.get(cat.id, 0)
         rows.append(
             schemas.CategoryBudgetOut(
                 category_id=cat.id,
@@ -118,7 +133,7 @@ def month_summary(session: Session, month: str) -> schemas.MonthBudgetOut:
                 group=cat.group.name,
                 is_income=False,
                 allocated_cents=month_alloc.get(cat.id, 0),
-                activity_cents=month_spend.get(cat.id, 0),
+                activity_cents=display_month_spend.get(cat.id, 0),
                 available_cents=available,
             )
         )
@@ -155,4 +170,5 @@ def category_available(session: Session, category_id: int, up_to_month: str) -> 
     """Envelope balance for one category through the given month."""
     spend = _split_activity_by_category(session, up_to_month, income=False).get(category_id, 0)
     alloc = _allocations_by_category(session, up_to_month).get(category_id, 0)
-    return alloc + spend
+    adjustment = credit.earmark_adjustments(session, up_to_month=up_to_month).get(category_id, 0)
+    return alloc + spend + adjustment

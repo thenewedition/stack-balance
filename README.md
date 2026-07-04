@@ -34,6 +34,12 @@ and Settings.
   progress, suggested monthly contribution, and on-track status.
 - **Cash flow & burn rate** — 12-month income vs. spending, average daily burn,
   and runway ("at this pace, funds last until …"), charted on the dashboard.
+- **Credit card payment handling** — every credit account gets a payment
+  envelope (in the auto-created "Credit Card Payments" group). Budgeted
+  spending on the card moves that money into the envelope, so its Available
+  always answers "how much can I safely pay?". Payments are **account
+  transfers** (checking → card): linked transaction pairs that are neither
+  income nor spending, excluded from all reports.
 
 ## Quick start
 
@@ -50,8 +56,8 @@ for the API.
 | Page | What you can do |
 |---|---|
 | **Dashboard** | To-Be-Budgeted / balance / burn / runway tiles, 12-month cash-flow chart, spending by category, sinking-fund progress, quick actions |
-| **Budget** | Navigate months, edit assignments inline, copy last month's assignments, see overspent envelopes |
-| **Transactions** | Filter/search, add/edit with a split-category editor, toggle cleared, select many and bulk recategorize/move/clear/delete |
+| **Budget** | Navigate months, edit assignments inline, copy last month's assignments, see overspent envelopes, record credit-card payments from the payment envelope |
+| **Transactions** | Filter/search, add/edit with a split-category editor, record transfers between accounts, toggle cleared, select many and bulk recategorize/move/clear/delete |
 | **Import** | Drag-and-drop a CSV/JSON export, review the dry-run preview, correct the auto-detected column mapping, commit |
 | **Settings** | Manage accounts, category groups/categories, recurring rules, sinking funds, and backups (create/download/restore) |
 
@@ -86,7 +92,7 @@ negative, inflows positive.
 |---|---|
 | Accounts | `GET/POST /api/accounts`, `GET/PATCH/DELETE /api/accounts/{id}` |
 | Categories | `GET/POST /api/category-groups`, `GET/POST/PATCH/DELETE /api/categories` |
-| Transactions | `GET/POST /api/transactions` (filter by account/category/date/payee/cleared), `GET/PATCH/DELETE /api/transactions/{id}`, `POST /api/transactions/bulk` |
+| Transactions | `GET/POST /api/transactions` (filter by account/category/date/payee/cleared), `GET/PATCH/DELETE /api/transactions/{id}`, `POST /api/transactions/bulk`, `POST /api/transfers` |
 | Budget | `GET /api/budget/{YYYY-MM}`, `PUT /api/budget/allocations` |
 | Recurring | `GET/POST /api/recurring`, `PATCH/DELETE /api/recurring/{id}`, `POST /api/recurring/run` |
 | Sinking funds | `GET/POST /api/sinking-funds`, `GET/PATCH/DELETE /api/sinking-funds/{id}` |
@@ -117,9 +123,16 @@ python -m pytest
   through that month.
 - Off-budget accounts (`on_budget: false`) are excluded from budget math and
   reports but still track balances.
+- **Credit cards**: categorized spending on a credit account earmarks that
+  amount into the card's payment envelope (uncategorized card spending moves
+  nothing — only budgeted spending is covered). Transfers into the card
+  (payments) draw the envelope down. Assign directly to the payment envelope
+  to budget for a pre-existing card balance.
+- **Transfers** are linked pairs: editing one side's date or amount syncs the
+  other; deleting one side deletes both; they can't be categorized or moved
+  to a different account.
 
 ## Roadmap
 
 Planned for later: scheduled auto-run of recurring rules, multi-currency,
-credit-card payment handling, budget templates/quick-budget, reconciliation
-workflow, and richer reports.
+budget templates/quick-budget, reconciliation workflow, and richer reports.
