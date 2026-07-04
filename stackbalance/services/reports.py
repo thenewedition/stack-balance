@@ -103,6 +103,126 @@ def burn_rate(session: Session, window_days: int = 30,
     )
 
 
+def _month_key(index: int) -> str:
+    return f"{index // 12:04d}-{index % 12 + 1:02d}"
+
+
+def net_worth(session: Session, months: int = 12,
+              as_of: date | None = None) -> schemas.NetWorthOut:
+    """End-of-month net worth across all active accounts (on- and off-budget:
+    net worth is everything you own minus everything you owe)."""
+    as_of = as_of or date.today()
+    end_index = as_of.year * 12 + (as_of.month - 1)
+    start_index = end_index - (months - 1)
+
+    accounts = session.execute(
+        select(models.Account).where(models.Account.is_active.is_(True))
+    ).scalars().all()
+    balances = {a.id: a.opening_balance_cents for a in accounts}
+
+    # Activity before the window seeds the running balances.
+    month_expr = func.strftime("%Y-%m", models.Transaction.date)
+    before = session.execute(
+        select(models.Transaction.account_id, func.sum(models.Transaction.amount_cents))
+        .where(month_expr < _month_key(start_index))
+        .group_by(models.Transaction.account_id)
+    ).all()
+    for account_id, total in before:
+        if account_id in balances:
+            balances[account_id] += int(total)
+
+    monthly = session.execute(
+        select(models.Transaction.account_id, month_expr.label("month"),
+               func.sum(models.Transaction.amount_cents))
+        .where(month_expr >= _month_key(start_index))
+        .where(month_expr <= _month_key(end_index))
+        .group_by(models.Transaction.account_id, "month")
+    ).all()
+    by_month: dict[str, dict[int, int]] = {}
+    for account_id, month, total in monthly:
+        by_month.setdefault(month, {})[account_id] = int(total)
+
+    out = []
+    for index in range(start_index, end_index + 1):
+        key = _month_key(index)
+        for account_id, delta in by_month.get(key, {}).items():
+            if account_id in balances:
+                balances[account_id] += delta
+        assets = sum(b for b in balances.values() if b > 0)
+        debts = sum(b for b in balances.values() if b < 0)
+        out.append(schemas.NetWorthMonth(
+            month=key, assets_cents=assets, debts_cents=debts, net_cents=assets + debts,
+        ))
+    return schemas.NetWorthOut(months=out)
+
+
+def category_trend(session: Session, category_id: int, months: int = 12,
+                   as_of: date | None = None) -> schemas.CategoryTrendOut:
+    """Monthly spending in one category over the window, with the average."""
+    as_of = as_of or date.today()
+    end_index = as_of.year * 12 + (as_of.month - 1)
+    start_index = end_index - (months - 1)
+    month_expr = func.strftime("%Y-%m", models.Transaction.date)
+
+    rows = dict(session.execute(
+        select(month_expr.label("month"),
+               func.coalesce(func.sum(models.Split.amount_cents), 0))
+        .join(models.Transaction, models.Split.transaction_id == models.Transaction.id)
+        .join(models.Account, models.Transaction.account_id == models.Account.id)
+        .where(models.Split.category_id == category_id)
+        .where(models.Account.on_budget.is_(True))
+        .where(models.Transaction.transfer_peer_id.is_(None))
+        .where(month_expr >= _month_key(start_index))
+        .where(month_expr <= _month_key(end_index))
+        .group_by("month")
+    ).all())
+
+    series = [
+        schemas.CategoryTrendMonth(month=_month_key(i), spent_cents=int(rows.get(_month_key(i), 0)))
+        for i in range(start_index, end_index + 1)
+    ]
+    average = sum(m.spent_cents for m in series) // len(series) if series else 0
+    category = session.get(models.Category, category_id)
+    return schemas.CategoryTrendOut(
+        category_id=category_id,
+        name=category.name if category else "?",
+        months=series,
+        average_cents=average,
+    )
+
+
+def top_payees(session: Session, months: int = 1, as_of: date | None = None,
+               limit: int = 15) -> list[schemas.PayeeReportRow]:
+    """Biggest spending destinations over the trailing window (on-budget,
+    outflows only, transfers excluded)."""
+    as_of = as_of or date.today()
+    end_index = as_of.year * 12 + (as_of.month - 1)
+    start_month = _month_key(end_index - (months - 1))
+    month_expr = func.strftime("%Y-%m", models.Transaction.date)
+
+    rows = session.execute(
+        select(
+            models.Transaction.payee,
+            func.count(models.Transaction.id),
+            func.sum(models.Transaction.amount_cents),
+        )
+        .join(models.Account)
+        .where(models.Account.on_budget.is_(True))
+        .where(models.Transaction.transfer_peer_id.is_(None))
+        .where(models.Transaction.amount_cents < 0)
+        .where(models.Transaction.payee != "")
+        .where(month_expr >= start_month)
+        .where(month_expr <= _month_key(end_index))
+        .group_by(models.Transaction.payee)
+        .order_by(func.sum(models.Transaction.amount_cents))
+        .limit(limit)
+    ).all()
+    return [
+        schemas.PayeeReportRow(payee=payee, count=int(count), total_cents=int(total))
+        for payee, count, total in rows
+    ]
+
+
 def spending_by_category(session: Session, month: str) -> list[schemas.SpendingByCategory]:
     month_expr = func.strftime("%Y-%m", models.Transaction.date)
     rows = session.execute(

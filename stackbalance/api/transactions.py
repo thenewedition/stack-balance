@@ -79,6 +79,9 @@ def delete_transaction(txn_id: int, session: Session = Depends(get_session)):
     txn = session.get(models.Transaction, txn_id)
     if txn is None:
         raise HTTPException(status_code=404, detail="transaction not found")
+    if txn.reconciled:
+        raise HTTPException(status_code=422,
+                            detail="transaction is reconciled — set reconciled=false first")
     transfer_service.delete_with_peer(session, txn)
     session.commit()
 

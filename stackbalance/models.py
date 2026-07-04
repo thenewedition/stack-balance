@@ -32,6 +32,8 @@ class Account(Base):
     payment_category_id: Mapped[int | None] = mapped_column(
         ForeignKey("categories.id", ondelete="SET NULL"), default=None
     )
+    last_reconciled_at: Mapped[dt.datetime | None] = mapped_column(DateTime, default=None)
+    last_reconciled_balance_cents: Mapped[int | None] = mapped_column(Integer, default=None)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
 
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="account")
@@ -75,6 +77,9 @@ class Transaction(Base):
     # Total amount in cents: negative = outflow, positive = inflow.
     amount_cents: Mapped[int] = mapped_column(Integer)
     cleared: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Reconciled = confirmed against a statement; locked against edits that
+    # would change the reconciled balance (amount/date/account/category).
+    reconciled: Mapped[bool] = mapped_column(Boolean, default=False)
     import_hash: Mapped[str | None] = mapped_column(String(64), index=True, default=None)
     recurring_rule_id: Mapped[int | None] = mapped_column(
         ForeignKey("recurring_rules.id", ondelete="SET NULL"), default=None

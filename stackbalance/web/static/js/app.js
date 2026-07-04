@@ -5,6 +5,7 @@ import * as dashboard from "./views/dashboard.js";
 import * as budget from "./views/budget.js";
 import * as transactions from "./views/transactions.js";
 import * as importer from "./views/import.js";
+import * as reports from "./views/reports.js";
 import * as settings from "./views/settings.js";
 
 const routes = {
@@ -12,6 +13,7 @@ const routes = {
   "budget": budget,
   "transactions": transactions,
   "import": importer,
+  "reports": reports,
   "settings": settings,
 };
 
