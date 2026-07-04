@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
+from . import autocat
 from . import transactions as txn_service
 
 COLUMN_SYNONYMS: dict[str, list[str]] = {
@@ -234,14 +235,14 @@ def import_rows(
     )
 
     # Category names -> ids for auto-assignment when the file has a category column.
-    categories = {
-        c.name.strip().lower(): c.id
-        for c in session.execute(select(models.Category)).scalars()
-    }
+    all_categories = session.execute(select(models.Category)).scalars().all()
+    categories = {c.name.strip().lower(): c.id for c in all_categories}
+    category_names = {c.id: c.name for c in all_categories}
+    rules = autocat.load_rules(session)
 
     errors: list[schemas.ImportRowError] = []
     preview: list[schemas.ImportPreviewRow] = []
-    imported = skipped = 0
+    imported = skipped = auto_categorized = 0
     seen_in_file: set[str] = set()
 
     for i, row in enumerate(rows, start=1):
@@ -262,16 +263,29 @@ def import_rows(
         duplicate = h in existing_hashes or h in seen_in_file
         seen_in_file.add(h)
 
+        # File-supplied category wins; otherwise consult the payee rules.
+        category_id = categories.get(cat_name.lower()) if cat_name else None
+        rule_hit = False
+        if category_id is None and payee:
+            rule_category = autocat.match(rules, payee)
+            if rule_category is not None:
+                category_id, rule_hit = rule_category, True
+
         if len(preview) < 20:
+            display_name = cat_name or None
+            if rule_hit:
+                display_name = category_names.get(category_id)
             preview.append(schemas.ImportPreviewRow(
                 date=txn_date, payee=payee, memo=memo, amount_cents=amount,
-                category=cat_name or None, duplicate=duplicate,
+                category=display_name, duplicate=duplicate,
             ))
 
         if duplicate and skip_duplicates:
             skipped += 1
             continue
 
+        if rule_hit:
+            auto_categorized += 1
         if not dry_run:
             txn_service.create_transaction(
                 session,
@@ -281,7 +295,7 @@ def import_rows(
                     payee=payee,
                     memo=memo,
                     amount_cents=amount,
-                    category_id=categories.get(cat_name.lower()) if cat_name else None,
+                    category_id=category_id,
                 ),
                 import_hash=h,
             )
@@ -293,6 +307,7 @@ def import_rows(
         total_rows=len(rows),
         imported=imported,
         skipped_duplicates=skipped,
+        auto_categorized=auto_categorized,
         errors=errors,
         column_mapping=mapping,
         preview=preview,

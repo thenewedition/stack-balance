@@ -325,6 +325,14 @@ function editorModal(txn, onDone) {
   ];
   const singleCategory = select(categoryOptions,
     txn && txn.splits.length === 1 ? (txn.splits[0].category_id ?? "") : "");
+  const rememberRule = checkbox("Always categorize this payee like this (saves a rule)", false);
+  const syncRememberVisibility = () => {
+    const singleMode = direction.value !== "transfer" && !isTransfer && !splitToggle.input.checked;
+    rememberRule.node.style.display =
+      singleMode && payeeInput.value.trim() && singleCategory.value ? "" : "none";
+  };
+  singleCategory.addEventListener("change", syncRememberVisibility);
+  payeeInput.addEventListener("input", syncRememberVisibility);
 
   /* split editor */
   const splitToggle = checkbox("Split across multiple categories",
@@ -390,8 +398,8 @@ function editorModal(txn, onDone) {
       updateSplitSum();
     }
   };
-  splitToggle.input.addEventListener("change", syncSplitVisibility);
-  direction.addEventListener("change", syncSplitVisibility);
+  splitToggle.input.addEventListener("change", () => { syncSplitVisibility(); syncRememberVisibility(); });
+  direction.addEventListener("change", () => { syncSplitVisibility(); syncRememberVisibility(); });
 
   const body = el("div", {},
     isTransfer ? el("p", { class: "muted", style: "font-size:12px;margin-top:0" },
@@ -405,9 +413,10 @@ function editorModal(txn, onDone) {
       el("div", { class: "wide" }, field("Memo", memoInput))),
     el("div", { class: "wide" }, transferSection),
     cleared.node, isReconciled ? keepReconciled.node : null,
-    splitToggle.node, singleSection, splitSection);
+    splitToggle.node, singleSection, rememberRule.node, splitSection);
   syncSplitVisibility();
   syncLock();
+  syncRememberVisibility();
 
   openModal(isEdit ? "Edit transaction" : "Add transaction", body, {
     submitLabel: isEdit ? "Save changes" : "Add",
@@ -493,7 +502,17 @@ function editorModal(txn, onDone) {
 
       if (isEdit) await api.patch(`/transactions/${txn.id}`, payload);
       else await api.post("/transactions", payload);
-      toast(isEdit ? "Transaction updated" : "Transaction added");
+
+      if (rememberRule.input.checked && rememberRule.node.style.display !== "none") {
+        await api.post("/categorization-rules", {
+          pattern: payeeInput.value.trim(),
+          match_type: "exact",
+          category_id: Number(singleCategory.value),
+        });
+        toast(`Saved rule: “${payeeInput.value.trim()}” → category`);
+      } else {
+        toast(isEdit ? "Transaction updated" : "Transaction added");
+      }
       onDone();
     },
   });

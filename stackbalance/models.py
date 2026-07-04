@@ -164,6 +164,25 @@ class RecurringRule(Base):
     category: Mapped[Category | None] = relationship()
 
 
+class CategorizationRule(Base):
+    """Payee -> category memory, applied to uncategorized imports and on demand.
+
+    Matching is case-insensitive. 'exact' rules beat 'contains' rules; among
+    'contains' matches the longest pattern wins.
+    """
+
+    __tablename__ = "categorization_rules"
+    __table_args__ = (UniqueConstraint("pattern", "match_type"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    pattern: Mapped[str] = mapped_column(String(200))
+    match_type: Mapped[str] = mapped_column(String(20), default="contains")  # exact|contains
+    category_id: Mapped[int] = mapped_column(ForeignKey("categories.id", ondelete="CASCADE"))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+    category: Mapped[Category] = relationship()
+
+
 class SinkingFund(Base):
     """A savings goal funded over time through a linked category envelope."""
 

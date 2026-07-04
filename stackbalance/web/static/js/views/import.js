@@ -91,6 +91,7 @@ export async function render(host) {
       el("span", {}, "Format: ", el("b", { text: result.format.toUpperCase() })),
       el("span", {}, "Rows: ", el("b", { text: String(result.total_rows) })),
       el("span", {}, "Will import: ", el("b", { text: String(result.imported) })),
+      el("span", {}, "Auto-categorized: ", el("b", { text: String(result.auto_categorized) })),
       el("span", {}, "Duplicates skipped: ", el("b", { text: String(result.skipped_duplicates) })),
       el("span", {}, "Errors: ", el("b", { text: String(result.errors.length) })));
 

@@ -310,6 +310,48 @@ class SinkingFundOut(ORMModel):
     on_track: bool | None = None
 
 
+# ---------- Auto-categorization rules ----------
+
+class CategorizationRuleIn(BaseModel):
+    pattern: str = Field(min_length=1, max_length=200)
+    match_type: str = "contains"
+    category_id: int
+
+    @field_validator("match_type")
+    @classmethod
+    def check_match_type(cls, v: str) -> str:
+        if v not in ("exact", "contains"):
+            raise ValueError("match_type must be 'exact' or 'contains'")
+        return v
+
+    @field_validator("pattern")
+    @classmethod
+    def strip_pattern(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("pattern cannot be blank")
+        return v
+
+
+class CategorizationRuleUpdate(BaseModel):
+    pattern: str | None = Field(default=None, min_length=1, max_length=200)
+    match_type: str | None = None
+    category_id: int | None = None
+
+
+class CategorizationRuleOut(ORMModel):
+    id: int
+    pattern: str
+    match_type: str
+    category_id: int
+    created_at: dt.datetime
+
+
+class ApplyRulesResult(BaseModel):
+    matched: int
+    dry_run: bool
+
+
 # ---------- Import ----------
 
 class ImportRowError(BaseModel):
@@ -332,6 +374,7 @@ class ImportResult(BaseModel):
     total_rows: int
     imported: int
     skipped_duplicates: int
+    auto_categorized: int = 0
     errors: list[ImportRowError]
     column_mapping: dict[str, str]
     preview: list[ImportPreviewRow]

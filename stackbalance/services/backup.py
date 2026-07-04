@@ -31,6 +31,7 @@ _TABLES: list[tuple[str, type]] = [
     ("splits", models.Split),
     ("budget_allocations", models.BudgetAllocation),
     ("sinking_funds", models.SinkingFund),
+    ("categorization_rules", models.CategorizationRule),
 ]
 
 

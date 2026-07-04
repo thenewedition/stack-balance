@@ -13,17 +13,80 @@ const FREQUENCIES = ["daily", "weekly", "biweekly", "monthly", "yearly"]
 export async function render(host) {
   await refdata.load(true);
   const refresh = () => render(host);
-  const [rules, funds, backups] = await Promise.all([
+  const [rules, funds, backups, catRules] = await Promise.all([
     api.get("/recurring?include_inactive=true"),
     api.get("/sinking-funds"),
     api.get("/backups"),
+    api.get("/categorization-rules"),
   ]);
   host.replaceChildren(
     accountsCard(refresh),
     categoriesCard(refresh),
+    autocatCard(catRules, refresh),
     recurringCard(rules, refresh),
     fundsCard(funds, refresh),
     backupsCard(backups, refresh));
+}
+
+/* ---------- auto-categorization rules ---------- */
+
+function autocatCard(rules, refresh) {
+  const patternInput = el("input", { type: "text", placeholder: "Payee contains…" });
+  const matchSelect = select([
+    { value: "contains", label: "Contains" },
+    { value: "exact", label: "Exact match" },
+  ]);
+  const categoryOptions = refdata.allCategoryOptions();
+  const categorySelect = select(categoryOptions);
+  const addButton = el("button", { class: "primary", text: "Add rule" });
+  addButton.addEventListener("click", async () => {
+    if (!patternInput.value.trim()) { toast("Enter a payee pattern"); return; }
+    if (!categoryOptions.length) { toast("Create a category first"); return; }
+    try {
+      await api.post("/categorization-rules", {
+        pattern: patternInput.value.trim(),
+        match_type: matchSelect.value,
+        category_id: Number(categorySelect.value),
+      });
+      toast("Rule saved");
+      refresh();
+    } catch (error) { toast(error.message); }
+  });
+
+  const applyButton = el("button", { text: "Apply to existing uncategorized" });
+  applyButton.addEventListener("click", async () => {
+    const result = await api.post("/categorization-rules/apply", {});
+    toast(result.matched
+      ? `Categorized ${result.matched} existing transaction(s)`
+      : "No uncategorized transactions matched");
+  });
+
+  const rows = rules.map(rule => {
+    const deleteButton = el("button", { class: "icon danger", text: "Delete" });
+    deleteButton.addEventListener("click", async () => {
+      await api.del(`/categorization-rules/${rule.id}`);
+      refresh();
+    });
+    return el("tr", { class: "no-hover" },
+      el("td", { text: rule.pattern }),
+      el("td", { class: "muted", text: rule.match_type }),
+      el("td", { text: refdata.categoryName(rule.category_id) }),
+      el("td", { class: "right" }, deleteButton));
+  });
+
+  return el("div", { class: "card" },
+    el("h2", { text: "Auto-categorization rules" }),
+    el("p", { class: "muted", style: "font-size:12px" },
+      "Imported transactions whose file has no category get the matching rule's category. Exact matches beat “contains”; longer patterns beat shorter ones. You can also save a rule from the transaction editor."),
+    rules.length
+      ? el("div", { class: "table-scroll" }, el("table", {},
+          el("thead", {}, el("tr", {},
+            el("th", { text: "Payee pattern" }), el("th", { text: "Match" }),
+            el("th", { text: "Category" }), el("th"))),
+          el("tbody", {}, ...rows)))
+      : el("div", { class: "empty", text: "No rules yet." }),
+    el("div", { class: "inline-form" },
+      patternInput, matchSelect, categorySelect, addButton, applyButton));
 }
 
 /* ---------- accounts ---------- */

@@ -42,6 +42,14 @@ and Settings.
   (amount/date/account) until explicitly unlocked.
 - **Reports page** — net worth over time (all accounts, assets vs. debts),
   per-category monthly spending trend with average, and top payees by period.
+- **Auto-categorization rules** — payee → category memory. Imported rows
+  whose file carries no category get the matching rule's category (exact
+  matches beat "contains"; longer patterns beat shorter). Save rules in
+  Settings, from the transaction editor ("always categorize this payee like
+  this"), and backfill existing uncategorized transactions with one click.
+- **Installable PWA** — add Stack Balance to your phone's home screen. The
+  app shell and last-fetched data are cached by a service worker, so it
+  opens instantly and works offline; API writes always go to the network.
 - **Credit card payment handling** — every credit account gets a payment
   envelope (in the auto-created "Credit Card Payments" group). Budgeted
   spending on the card moves that money into the envelope, so its Available
@@ -68,7 +76,7 @@ for the API.
 | **Transactions** | Filter/search, add/edit with a split-category editor, record transfers between accounts, toggle cleared, select many and bulk recategorize/move/clear/delete |
 | **Import** | Drag-and-drop a CSV/JSON export, review the dry-run preview, correct the auto-detected column mapping, commit |
 | **Reports** | Net worth trend, category spending trend with average, top payees by period |
-| **Settings** | Manage accounts, category groups/categories, recurring rules, sinking funds, and backups (create/download/restore) |
+| **Settings** | Manage accounts, category groups/categories, auto-categorization rules, recurring rules, sinking funds, and backups (create/download/restore) |
 
 To reconcile an account: filter Transactions to that account, click
 **Reconcile**, and follow the modal. Reconciled rows show a 🔒.
@@ -111,6 +119,7 @@ negative, inflows positive.
 | Import | `POST /api/import` (multipart: `file`, `account_id`, `dry_run`, `skip_duplicates`, `column_mapping`) |
 | Backups | `POST/GET /api/backups`, `GET/DELETE /api/backups/{filename}`, `POST /api/backups/restore` |
 | Reports | `GET /api/reports/cash-flow`, `GET /api/reports/burn-rate`, `GET /api/reports/spending/{YYYY-MM}`, `GET /api/reports/net-worth`, `GET /api/reports/category-trend/{id}`, `GET /api/reports/payees` |
+| Auto-categorization | `GET/POST /api/categorization-rules`, `PATCH/DELETE /api/categorization-rules/{id}`, `POST /api/categorization-rules/apply` |
 
 ## Configuration
 
@@ -146,15 +155,10 @@ python -m pytest
 
 ## Roadmap
 
-- **Auto-categorization rules** — remember payee → category pairings and
-  apply them during import, so recurring merchants land in the right
-  envelope automatically.
 - **Category targets & goals** — monthly funding targets per envelope with
   underfunded indicators on the Budget page.
 - **Debt payoff planner** — interest rates on credit/loan accounts with
   payoff projections and avalanche/snowball comparisons.
-- **Installable PWA** — offline-capable mobile UI (add-to-home-screen) for
-  entering transactions on the go.
 - **Automatic backups** — scheduled backup creation with retention rules,
   on top of the existing one-click backups.
 - **CSV export** — download any filtered register or report view.
