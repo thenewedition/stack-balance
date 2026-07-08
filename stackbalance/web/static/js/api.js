@@ -26,11 +26,20 @@ export const api = {
   put: json("PUT"),
   patch: json("PATCH"),
   del: (path) => request(path, { method: "DELETE" }),
-  /** multipart upload; fields is a plain object, file is a File/Blob */
-  upload: (path, fields, file) => {
+  /** multipart upload; fields is a plain object, file is a File/Blob.
+   *  Retries once on a transport-level failure (TypeError/NetworkError) —
+   *  safe here because import dedupes by content hash and restore replaces
+   *  everything, so a duplicate delivery cannot double-apply. */
+  upload: async (path, fields, file, filename) => {
     const form = new FormData();
     for (const [key, value] of Object.entries(fields)) form.append(key, value);
-    form.append("file", file);
-    return request(path, { method: "POST", body: form });
+    form.append("file", file, filename ?? file.name ?? "upload");
+    try {
+      return await request(path, { method: "POST", body: form });
+    } catch (error) {
+      if (!(error instanceof TypeError)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      return request(path, { method: "POST", body: form });
+    }
   },
 };

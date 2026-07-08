@@ -37,7 +37,8 @@ export async function render(host) {
   });
 
   const resultHost = el("div");
-  let currentFile = null;
+  let currentFile = null;      // in-memory Blob — never re-read from disk at send time
+  let currentFileName = "";
   let currentMapping = null;
 
   async function runImport(dryRun) {
@@ -47,21 +48,49 @@ export async function render(host) {
       skip_duplicates: String(skipDupes.input.checked),
     };
     if (currentMapping) fields.column_mapping = JSON.stringify(currentMapping);
-    return api.upload("/import", fields, currentFile);
+    return api.upload("/import", fields, currentFile, currentFileName);
+  }
+
+  const DROPZONE_IDLE = "Drop a CSV or JSON export here, or click to choose a file";
+
+  function showError(title, ...lines) {
+    dropzone.textContent = DROPZONE_IDLE;
+    resultHost.replaceChildren(el("div", { class: "card" },
+      el("h2", { text: title }),
+      ...lines.map(line => el("p", { class: "error-text", text: line }))));
   }
 
   async function startPreview(file) {
-    currentFile = file;
     currentMapping = null;
+    dropzone.textContent = `Reading ${file.name}…`;
+
+    // Read the file into memory NOW, while it is certainly readable. Browsers
+    // read File objects lazily at send time, and a file on a restricted mount
+    // (e.g. a VirtualBox shared folder) or one modified after selection fails
+    // there — surfacing as a misleading "NetworkError".
+    let bytes;
+    try {
+      bytes = await file.arrayBuffer();
+    } catch {
+      showError("Could not read the file",
+        `“${file.name}” could not be read from disk.`,
+        "If it is on a shared folder (e.g. a VirtualBox shared folder) or was modified after you picked it, copy it into your home folder and choose it again.");
+      return;
+    }
+    currentFile = new Blob([bytes], { type: file.type || "text/csv" });
+    currentFileName = file.name;
+
     dropzone.textContent = `Selected: ${file.name} — previewing…`;
     try {
       showResult(await runImport(true));
       dropzone.textContent = `Selected: ${file.name} (drop another file to replace)`;
     } catch (error) {
-      dropzone.textContent = "Drop a CSV or JSON export here, or click to choose a file";
-      resultHost.replaceChildren(el("div", { class: "card" },
-        el("h2", { text: "Could not parse file" }),
-        el("p", { class: "error-text", text: error.message })));
+      if (error instanceof TypeError) {
+        showError("Could not reach the server",
+          "The upload never got a response. Check the terminal running Stack Balance: if no “POST /api/import” line appears when you retry, the request is being blocked before it leaves the browser.");
+      } else {
+        showError("Could not parse file", error.message);
+      }
     }
   }
 

@@ -460,13 +460,24 @@ function backupsCard(backups, refresh) {
   const restoreInput = el("input", { type: "file", accept: ".zip", style: "display:none" });
   const restoreButton = el("button", { text: "Restore from file…" });
   restoreButton.addEventListener("click", () => restoreInput.click());
-  restoreInput.addEventListener("change", () => {
+  restoreInput.addEventListener("change", async () => {
     const file = restoreInput.files[0];
     if (!file) return;
+    // Read into memory immediately — a lazily-read File can fail at send
+    // time on restricted mounts and masquerade as a network error.
+    let bytes;
+    try {
+      bytes = await file.arrayBuffer();
+    } catch {
+      toast(`Could not read “${file.name}” from disk — copy it to your home folder and retry`);
+      restoreInput.value = "";
+      return;
+    }
+    const blob = new Blob([bytes], { type: "application/zip" });
     confirmModal("Restore backup",
       `Restore from “${file.name}”? This REPLACES all current data with the backup's contents.`,
       async () => {
-        const result = await api.upload("/backups/restore", {}, file);
+        const result = await api.upload("/backups/restore", {}, blob, file.name);
         toast("Restored: " + Object.entries(result.counts)
           .map(([table, count]) => `${count} ${table}`).join(", "));
         refdata.invalidate();
